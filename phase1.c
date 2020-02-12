@@ -18,7 +18,6 @@ void launch();
 static void enableInterrupts();
 static void check_deadlock();
 
-
 /* -------------------------- Globals ------------------------------------- */
 
 /* Patrick's debugging global variable... */
@@ -45,8 +44,7 @@ unsigned int next_pid = SENTINELPID;
    Returns - nothing
    Side Effects - lots, starts the whole thing
    ----------------------------------------------------------------------- */
-void startup()
-{
+void startup(){
    int i;      /* loop index */
    int result; /* value returned by call to fork1() */
 
@@ -55,7 +53,7 @@ void startup()
    /* Initialize the Ready list, etc. */
    if (DEBUG && debugflag)
       console("startup(): initializing the Ready & Blocked lists\n");
-   ReadyList = NULL;
+   //ReadyList = NULL;
 
    /* Initialize the clock interrupt handler */
 
@@ -69,7 +67,7 @@ void startup()
          console("startup(): fork1 of sentinel returned error, halting...\n");
       halt(1);
    }
-  
+
    /* start the test process */
    if (DEBUG && debugflag)
       console("startup(): calling fork1() for start1\n");
@@ -92,8 +90,7 @@ void startup()
    Returns - nothing
    Side Effects - none
    ----------------------------------------------------------------------- */
-void finish()
-{
+void finish(){
    if (DEBUG && debugflag)
       console("in finish...\n");
 } /* finish */
@@ -110,8 +107,7 @@ void finish()
    Side Effects - ReadyList is changed, ProcTable is changed, Current
                   process information changed
    ------------------------------------------------------------------------ */
-int fork1(char *name, int (*f)(void *), void *arg, int stacksize, int priority)
-{
+int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority){
    int proc_slot;
 
    if (DEBUG && debugflag)
@@ -143,11 +139,13 @@ int fork1(char *name, int (*f)(void *), void *arg, int stacksize, int priority)
     * the initial value of the process's program counter (PC)
     */
    context_init(&(ProcTable[proc_slot].state), psr_get(),
-                ProcTable[proc_slot].stack, 
+                ProcTable[proc_slot].stack,
                 ProcTable[proc_slot].stacksize, launch);
 
    /* for future phase(s) */
    p1_fork(ProcTable[proc_slot].pid);
+
+   return 1;
 
 } /* fork1 */
 
@@ -159,8 +157,7 @@ int fork1(char *name, int (*f)(void *), void *arg, int stacksize, int priority)
    Returns - nothing
    Side Effects - enable interrupts
    ------------------------------------------------------------------------ */
-void launch()
-{
+void launch(){
    int result;
 
    if (DEBUG && debugflag)
@@ -182,18 +179,17 @@ void launch()
 
 /* ------------------------------------------------------------------------
    Name - join
-   Purpose - Wait for a child process (if one has been forked) to quit.  If 
+   Purpose - Wait for a child process (if one has been forked) to quit.  If
              one has already quit, don't wait.
-   Parameters - a pointer to an int where the termination code of the 
+   Parameters - a pointer to an int where the termination code of the
                 quitting process is to be stored.
    Returns - the process id of the quitting child joined on.
 		-1 if the process was zapped in the join
 		-2 if the process has no children
-   Side Effects - If no child process has quit before join is called, the 
+   Side Effects - If no child process has quit before join is called, the
                   parent is removed from the ready list and blocked.
    ------------------------------------------------------------------------ */
-int join(int *code)
-{
+int join(int *code){
 } /* join */
 
 
@@ -206,8 +202,7 @@ int join(int *code)
    Returns - nothing
    Side Effects - changes the parent of pid child completion status list.
    ------------------------------------------------------------------------ */
-void quit(int code)
-{
+void quit(int code){
    p1_quit(Current->pid);
 } /* quit */
 
@@ -222,8 +217,7 @@ void quit(int code)
    Returns - nothing
    Side Effects - the context of the machine is changed
    ----------------------------------------------------------------------- */
-void dispatcher(void)
-{
+void dispatcher(void){
    proc_ptr next_process;
 
    p1_switch(Current->pid, next_process->pid);
@@ -241,8 +235,7 @@ void dispatcher(void)
    Side Effects -  if system is in deadlock, print appropriate error
 		   and halt.
    ----------------------------------------------------------------------- */
-int sentinel (void * dummy)
-{
+int sentinel (void * dummy){
    if (DEBUG && debugflag)
       console("sentinel(): called\n");
    while (1)
@@ -254,16 +247,14 @@ int sentinel (void * dummy)
 
 
 /* check to determine if deadlock has occurred... */
-static void check_deadlock()
-{
+static void check_deadlock(){
 } /* check_deadlock */
 
 
 /*
  * Disables the interrupts.
  */
-void disableInterrupts()
-{
+void disableInterrupts(){
   /* turn the interrupts OFF iff we are in kernel mode */
   if((PSR_CURRENT_MODE & psr_get()) == 0) {
     //not in kernel mode
@@ -273,3 +264,24 @@ void disableInterrupts()
     /* We ARE in kernel mode */
     psr_set( psr_get() & ~PSR_CURRENT_INT );
 } /* disableInterrupts */
+
+//end skeleton code
+
+/*
+ * enable the interrupts.
+ */
+void enableInterrupts(){
+    /* turn the interrupts OFF iff we are in kernel mode */
+    if((PSR_CURRENT_MODE & psr_get()) == 0) {
+      //not in kernel mode
+      console("Kernel Error: Not in kernel mode, may not enable interrupts\n");
+      halt(1);
+    } else
+      /* We ARE in kernel mode */
+      psr_set( psr_get() & ~PSR_CURRENT_INT );
+}
+
+//main for testing
+// int main(){
+//
+// }
