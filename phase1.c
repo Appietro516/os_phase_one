@@ -17,9 +17,11 @@ void dispatcher(void);
 void launch();
 void enableInterrupts();
 void disableInterrupts();
+void dump_process(proc_struct);
 static void check_deadlock();
 static void insertRL(proc_ptr proc);
 static void clear_process(proc_ptr process);
+void clock_handler(int pid);
 
 /* ------------------------- MACROS ----------------------------------- */
 #define READY 1
@@ -27,6 +29,7 @@ static void clear_process(proc_ptr process);
 #define ZAPPED 3
 #define QUIT 4
 #define EMPTY -1
+#define TIME_SLICE 8000
 
 /* -------------------------- Globals ------------------------------------- */
 
@@ -71,7 +74,7 @@ void startup(){
    ReadyList = NULL;
 
    /* Initialize the clock interrupt handler */
-   //int_vec[CLOCK_DEV] = clock_handler;
+   int_vec[CLOCK_INT] = clock_handler;
 
    /* startup a sentinel process */
    if (DEBUG && debugflag)
@@ -269,7 +272,7 @@ void launch(){
       console("launch(): started\n");
 
    /* Enable interrupts */
-   enableInterrupts();
+   //enableInterrupts();
 
    console("launch(): enabled interrupts\n");
 
@@ -320,7 +323,6 @@ int join(int *code){
             enableInterrupts();
             return process.pid;
         }
-        process = *process.next_proc_ptr;
     }
 } /* join */
 
@@ -335,20 +337,23 @@ int join(int *code){
    Side Effects - changes the parent of pid child completion status list.
    ------------------------------------------------------------------------ */
 void quit(int code){
-    disableInterrupts();
+    console("QUIT STARTED\n");
+    //disableInterrupts();
     /* test if in kernel mode; halt if in user mode */
     if((PSR_CURRENT_MODE & psr_get()) == 0) {
         //not in kernel mode
         console("Kernel Error: Not in kernel mode, may not quit\n");
-        halt(1);
     }
 
     for(int i = 1; i < MAXPROC; i++){
         proc_ptr process = &ProcTable[i];
         if(process->status != QUIT && process->parent_pid == Current->pid && process != Current) {
-            console("quit(): process still has children");
-            halt(1);
-            return;
+            enableInterrupts();
+            console("quit(): process still has children\n");
+            while (1){
+               check_deadlock();
+               waitint();
+            }
         }
     }
 
@@ -357,17 +362,22 @@ void quit(int code){
     Current->exit_code = code;
     p1_quit(Current->pid);
 
-    for(int i = 1; i < MAXPROC; i++){
-        proc_struct process = ProcTable[i];
-        if(process.status == QUIT && process.parent_pid == Current->pid && &process != Current) {
-            clear_process(&process);
-        } else if(process.status == ZAPPED && process.zapped_pid == Current->pid){
-            process.status = READY;
-        }
-    }
+    //should remove from ready list, cear_process on current, then call dispsatcher
+    //should also check for ZAPPED process and add to READY
+
+    //this code does not appear to be working
+    // for(int i = 1; i < MAXPROC; i++){
+    //     proc_struct process = ProcTable[i];
+    //     if(process.status == QUIT && process.parent_pid == Current->pid && &process != Current) {
+    //         console("GOT QUIT");
+    //         clear_process(&process);
+    //     } else if(process.status == ZAPPED && process.zapped_pid == Current->pid){
+    //         process.status = READY;
+    //     }
+    // }
 
     //think dispatcher needs to be called?
-    //dispatcher();
+    dispatcher();
 } /* quit */
 
 
@@ -382,18 +392,32 @@ void quit(int code){
    Side Effects - the context of the machine is changed
    ----------------------------------------------------------------------- */
 void dispatcher(void){
-    //TODO
-    //need to loop through ready processes, choose highest priority, get context, and context_switch
-   console("DISPAtcher called");
-   //proc_ptr next_process;
+   // need to loop through ready processes, choose highest priority, get context, and context_switch
+   console("DISPATCHED\n");
+   // proc_ptr next_process;
 
-   proc_struct temp_process = *ReadyList->next_proc_ptr;
-   Current = &temp_process;
+    proc_ptr curr = ReadyList;
+    proc_ptr to_sched = curr;
+    while (curr != NULL) {
+        if ((curr != to_sched && to_sched->run_time > TIME_SLICE) || curr->priority < to_sched->priority) {
+            to_sched->run_time = 0;
+            to_sched = curr;
+        }
+        curr = curr->next_proc_ptr;
+    }
 
-   printf("RL slot 1: %d\n", temp_process.pid);
+    to_sched->start_time = clock();
+    proc_ptr previous = Current;
+    Current = to_sched;
+    if (previous == NULL) {
+        context_switch(NULL, &(Current->state));
+    } else {
+        context_switch(&(previous->state), &(Current->state));
+    }
 
-   context_switch(NULL, &temp_process.state);
-   //p1_switch(Current->pid, next_process->pid);
+    dump_process(*to_sched);
+
+    // p1_switch(Current->pid, to_sched->pid);
 } /* dispatcher */
 
 /* ------------------------------------------------------------------------
@@ -439,7 +463,7 @@ static void check_deadlock(){
             halt(0);
         }
     }
-    console("Finished checking deadlocks");
+    //console("Finished checking deadlocks");
 } /* check_deadlock */
 
 
@@ -513,8 +537,13 @@ void dump_processes(void){
 }
 
 void clock_handler(int pid){
-    //TODO
-    //DEFER UNTIL FORK1 JOIN QUIT AND DISPATCHER WORK
+    Current->run_time = clock() - Current->start_time;
+    //console("Started clock handler");
+    if (Current->run_time > TIME_SLICE) {
+        dispatcher();
+    }
+    else
+        enableInterrupts(); // re-enable interrupts
 }
 
 //SUPPORT FOR LATER PHASES (REQUIRED)
@@ -578,6 +607,16 @@ void clear_process(proc_ptr process){
     process->exit_code = -1;
     process->num_kids = 0;
     process->start_time = -1;
+}
+
+void dump_process(proc_struct process) {
+    printf("Name: %s\n", process.name);
+    printf("PID: %d\n", process.pid);
+    printf("Parent's PID: %d\n", process.parent_pid);
+    printf("Priority: %d\n", process.priority);
+    printf("Status: %d\n", process.status);
+    printf("Children count: %d\n", process.num_kids);
+    // printf("CPU time consumed: %d\n", process.)
 }
 
 /* ------------------------------------------------------------------------
