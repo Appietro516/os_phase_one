@@ -1,3 +1,4 @@
 usloss
 libphase1.a
 *.o
+.vscode
