@@ -128,7 +128,9 @@ void finish(){
 int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority){
     int proc_slot;
     int is_sentinal = strcmp(name, "sentinel") == 0;
-    
+
+
+
     if (DEBUG && debugflag){
       console("fork1(): creating process %s\n", name);
     }
@@ -248,10 +250,6 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority){
 
    console("fork1(): PASSED DISPATCHER\n");
 
-   //enable interrupts for parent pid
-   enableInterrupts();
-
-    console("fork1(): ENABLED INTERRUPTS\n");
 
    return ProcTable[proc_slot].pid;
 } /* fork1 */
