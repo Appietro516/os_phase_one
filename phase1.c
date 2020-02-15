@@ -412,7 +412,6 @@ int sentinel (void * dummy){
       console("sentinel(): called\n");
    while (1)
    {
-      enableInterrupts();
       check_deadlock();
       waitint();
    }
