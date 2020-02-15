@@ -15,10 +15,18 @@ int sentinel (void *);
 extern int start1 (char *);
 void dispatcher(void);
 void launch();
-static void enableInterrupts();
+void enableInterrupts();
+void disableInterrupts();
 static void check_deadlock();
 static void insertRL(proc_ptr proc);
 static void clear_process(proc_ptr process);
+
+/* ------------------------- MACROS ----------------------------------- */
+#define READY 1
+#define BLOCKED 2
+#define ZAPPED 3
+#define QUIT 4
+#define EMPTY -1
 
 /* -------------------------- Globals ------------------------------------- */
 
@@ -54,7 +62,7 @@ void startup(){
 
    /* initialize the process table */
    for (i = 0; i < MAXPROC; i++){
-       clear_prcess(ProcTable[i]);
+       clear_process(&ProcTable[i]);
    }
 
    /* Initialize the Ready list, etc. */
@@ -85,7 +93,8 @@ void startup(){
       halt(1);
    }
 
-   dispatcher();
+   //TODO
+   //dispatcher();
    console("startup(): Should not see this message! ");
    console("Returned from fork1 call that created start1\n");
 
@@ -118,10 +127,11 @@ void finish(){
    ------------------------------------------------------------------------ */
 int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority){
     int proc_slot;
-    bool is_sentinal = strcmp(name, "sentinel") == 0;
-
-    if (DEBUG && debugflag)
+    int is_sentinal = strcmp(name, "sentinel") == 0;
+    
+    if (DEBUG && debugflag){
       console("fork1(): creating process %s\n", name);
+    }
 
     /* test if in kernel mode; halt if in user mode */
     if((PSR_CURRENT_MODE & psr_get()) == 0) {
@@ -130,20 +140,18 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority){
      halt(1);
     }
 
-    //disable interrupts
-    disableInterrupts();
-
     //check if arguments passed are NULL
     if (f == NULL || name == NULL ){
-        if (DEBUG && debugflag)}{
+        if (DEBUG && debugflag){
             console("fork1(): Null pointer argument recieved\n");
         }
         return -1;
     }
 
     //check if function priority makes sense
-    if ((!is_sentinal && (priority > MAXPRIORITY || priority < MINPRIORITY)){
-        if (DEBUG && debugflag)}{
+    if (!is_sentinal && (priority < MAXPRIORITY || priority > MINPRIORITY)) {
+        if (DEBUG && debugflag){
+            //printf("priority:%d\nmaxprior:%d\nminprior:%d/n", priority, MAXPRIORITY, MINPRIORITY);
             console("fork1(): Priority out of bounds\n");
         }
         return -1;
@@ -157,14 +165,18 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority){
        return -2;
     }
 
+    console("fork1(): REACHED ERROR CHECKS\n");
+
     /* find an empty slot in the process table */
     proc_slot = next_pid % MAXPROC;
     int pid_count = 0;
-    while (pid_count < MAXPROC && ProcTable[proc_slot].status != NULL){
+    while (pid_count < MAXPROC && ProcTable[proc_slot].status != EMPTY){
        next_pid++;
        proc_slot = next_pid % MAXPROC;
        pid_count++;
     }
+
+    console("fork1(): GOT PIDS\n");
 
     if (pid_count >= MAXPROC){
        if (DEBUG && debugflag){
@@ -179,6 +191,8 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority){
         halt(1);
     }
 
+    console("fork1(): GOT PNAME\n");
+
     //store metadata about process
    strcpy(ProcTable[proc_slot].name, name);
    ProcTable[proc_slot].pid = next_pid++;
@@ -187,14 +201,16 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority){
 
    //Store function pointer and argument value
    ProcTable[proc_slot].start_func = f;
-   if ( arg == NULL )
+   if ( arg == NULL ) {
       ProcTable[proc_slot].start_arg[0] = '\0';
+  }
    else if ( strlen(arg) >= (MAXARG - 1) ) {
       console("fork1(): argument too long.  Halting...\n");
       halt(1);
    }
-   else
+   else {
       strcpy(ProcTable[proc_slot].start_arg, arg);
+  }
 
    //malloc the stack for the process
    ProcTable[proc_slot].stacksize = stacksize;
@@ -203,10 +219,12 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority){
    //add parent pid for processes
    //add child pid for current
    if (Current){
-       Current.num_kids++;
-       ProcTable[proc_slot].parent_pid = Current.pid;
-       Current.child_proc_ptr = &ProcTable[proc_slot];
+       Current->num_kids++;
+       ProcTable[proc_slot].parent_pid = Current->pid;
+       Current->child_proc_ptr = &ProcTable[proc_slot];
    }
+
+   console("fork1(): GOT CONTEXT INIT\n");
 
    /* Initialize context for this process, but use launch function pointer for
     * the initial value of the process's program counter (PC)
@@ -216,7 +234,9 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority){
                 ProcTable[proc_slot].stacksize, launch);
 
    //add process to ReadyList
-   insertRL(ProcTable[proc_slot]);
+   insertRL(&ProcTable[proc_slot]);
+
+   console("fork1(): INSERTED TO RL\n");
 
    /* for future phase(s) */
    p1_fork(ProcTable[proc_slot].pid);
@@ -226,8 +246,12 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority){
        dispatcher();
    }
 
+   console("fork1(): PASSED DISPATCHER\n");
+
    //enable interrupts for parent pid
    enableInterrupts();
+
+    console("fork1(): ENABLED INTERRUPTS\n");
 
    return ProcTable[proc_slot].pid;
 } /* fork1 */
@@ -248,6 +272,8 @@ void launch(){
 
    /* Enable interrupts */
    enableInterrupts();
+
+   console("launch(): enabled interrupts\n");
 
    /* Call the function passed to fork1, and capture its return value */
    result = Current->start_func(Current->start_arg);
@@ -277,26 +303,26 @@ int join(int *code){
     disableInterrupts();
 
     //check if there are child processes
-    if (Current.child_proc_ptr == NULL){
+    if (Current->child_proc_ptr == NULL){
         enableInterrupts();
         return -2;
     }
 
     //check if the current process has been zapped
-    if (Current.status == ZAPPED){
+    if (Current->status == ZAPPED){
         enableInterrupts();
         return -1;
     }
 
     //check if children have quit
-    for (i = 0; i < MAXPROC; i++){
-        process = ProcTable[i];
-        if(process.status == QUIT && process.parent_pid == Current.pid){
+    for (int i = 0; i < MAXPROC; i++){
+        proc_struct process = ProcTable[i];
+        if(process.status == QUIT && process.parent_pid == Current->pid){
             *code = process.exit_code;
             enableInterrupts();
             return process.pid;
         }
-        process = process.next_proc_ptr;
+        process = *process.next_proc_ptr;
     }
 } /* join */
 
@@ -320,8 +346,8 @@ void quit(int code){
     }
 
     for(int i = 1; i < MAXPROC; i++){
-        proc_ptr process = ProcTable[i];
-        if(process.status != QUIT && process.parent_pid == Current.pid && process != Current) {
+        proc_ptr process = &ProcTable[i];
+        if(process->status != QUIT && process->parent_pid == Current->pid && process != Current) {
             console("quit(): process still has children");
             halt(1);
             return;
@@ -329,21 +355,21 @@ void quit(int code){
     }
 
     //add quit metadata
-    Current.status = QUIT;
-    Current.exit_code = code;
+    Current->status = QUIT;
+    Current->exit_code = code;
     p1_quit(Current->pid);
 
     for(int i = 1; i < MAXPROC; i++){
-        proc_ptr process = ProcTable[i];
-        if(process.status == QUIT && process.parent_pid == Current.pid && process != Current) {
-            clear_process(process);
-        } else if(process.status == ZAPPED && process.zapped_pid == Current.pid){
+        proc_struct process = ProcTable[i];
+        if(process.status == QUIT && process.parent_pid == Current->pid && &process != Current) {
+            clear_process(&process);
+        } else if(process.status == ZAPPED && process.zapped_pid == Current->pid){
             process.status = READY;
         }
     }
 
     //think dispatcher needs to be called?
-    dispatcher();
+    //dispatcher();
 } /* quit */
 
 
@@ -359,9 +385,17 @@ void quit(int code){
    ----------------------------------------------------------------------- */
 void dispatcher(void){
     //TODO
-   proc_ptr next_process;
+    //need to loop through ready processes, choose highest priority, get context, and context_switch
+   console("DISPAtcher called");
+   //proc_ptr next_process;
 
-   p1_switch(Current->pid, next_process->pid);
+   proc_struct temp_process = *ReadyList->next_proc_ptr;
+   Current = &temp_process;
+
+   printf("RL slot 1: %d\n", temp_process.pid);
+
+   context_switch(NULL, &temp_process.state);
+   //p1_switch(Current->pid, next_process->pid);
 } /* dispatcher */
 
 /* ------------------------------------------------------------------------
@@ -380,6 +414,7 @@ int sentinel (void * dummy){
       console("sentinel(): called\n");
    while (1)
    {
+      enableInterrupts();
       check_deadlock();
       waitint();
    }
@@ -391,7 +426,7 @@ static void check_deadlock(){
     int total_processes;
     int ready_processes;
     for(int i = 1; i < MAXPROC; i++){
-        proc_ptr process = ProcTable[i];
+        proc_struct process = ProcTable[i];
         if(process.status == READY) {
             ready_processes++;
             total_processes++;
@@ -406,8 +441,8 @@ static void check_deadlock(){
         } else { //not deadlock
             halt(0);
         }
-
     }
+    console("Finished checking deadlocks");
 } /* check_deadlock */
 
 
@@ -431,27 +466,26 @@ void disableInterrupts(){
  * enable the interrupts.
  */
 void enableInterrupts(){
-    /* turn the interrupts OFF iff we are in kernel mode */
     if((PSR_CURRENT_MODE & psr_get()) == 0) {
       //not in kernel mode
-      console("Kernel Error: Not in kernel mode, may not enable interrupts\n");
+      console("Kernel Error: Not in kernel mode, may not disable interrupts\n");
       halt(1);
     } else
       /* We ARE in kernel mode */
-      psr_set( psr_get() & ~PSR_CURRENT_INT );
+     psr_set( psr_get() & PSR_CURRENT_INT );
 }
 
 
 int zap(int pid){
-    if (Current.pid == pid){
+    if (Current->pid == pid){
         console("zap(): process cannot zap itself");
         halt(1);
     }
 
     proc_ptr process;
     for(int i = 1; i < MAXPROC; i++){
-        process = ProcTable[i];
-        if (process.pid == pid){
+        proc_ptr process = &ProcTable[i];
+        if (process->pid == pid){
             break;
         }
         process = NULL;
@@ -462,21 +496,21 @@ int zap(int pid){
         halt(1);
     }
 
-    Current.status = ZAPPED;
-    Current.zapped_pid = process.pid;
+    Current->status = ZAPPED;
+    Current->zapped_pid = process->pid;
 }
 
 int	is_zapped(void){
-    return Current.status == ZAPPED;
+    return Current->status == ZAPPED;
 }
 
 int	getpid(void){
-    return Current.pid;
+    return Current->pid;
 }
 
 void dump_processes(void){
     for(int i = 1; i < MAXPROC; i++){
-        proc_ptr process = ProcTable[i];
+        proc_struct process = ProcTable[i];
         //TODO just printing process metadata
     }
 }
@@ -494,25 +528,25 @@ int block_me(int new_status){
         console("block_me(): status not greater than 10\n");
         halt(1);
     }
-    if (Current.status == ZAPPED){
+    if (Current->status == ZAPPED){
         console("block_me(): attempting to block a zapped process\n");
         return -1;
     }
-    Current.status = new_status;
+    Current->status = new_status;
     return 0;
 }
 
 int unblock_proc(int pid){
-    if (Current.status == ZAPPED){
+    if (Current->status == ZAPPED){
         console("unblock_proc(): attempting to unblock a zapped process\n");
         return -1;
     }
 
     for(int i = 1; i < MAXPROC; i++){
-        proc_ptr process = ProcTable[i];
-        if (process.pid == pid && process.pid != Current.pid && process.status > 10){
-            process.status = READY;
-            insertRL(process);
+        proc_struct proc = ProcTable[i];
+        if (proc.pid == pid && proc.pid != Current->pid && proc.status > 10){
+            proc.status = READY;
+            insertRL(&proc);
             return 0;
         }
     }
@@ -531,22 +565,22 @@ void time_slice(void){
 //non-required helper functions
 
 void clear_process(proc_ptr process){
-    process.next_proc_ptr = NULL;
-    process.child_proc_ptr = NULL;
-    process.next_sibling_ptr = NULL;
-    strcpy(process.name, "");   /
-    strcpy(process.startArg, "");
-    process.state = null;
-    process.pid = -1;
-    process.priority = -1;
-    process.start_func = NULL;
-    process.stack = NULL;
-    process.stacksize = 1;
-    process.status = -1;
-    process.parent_pid = -1;
-    process.exit_code = -1;
-    process.num_kids = 0;
-    process.start_time = -1;
+    process->next_proc_ptr = NULL;
+    process->child_proc_ptr = NULL;
+    process->next_sibling_ptr = NULL;
+    strcpy(process->name, "");
+    strcpy(process->start_arg, "");
+    //process->state = NULL;
+    process->pid = -1;
+    process->priority = -1;
+    process->start_func = NULL;
+    process->stack = NULL;
+    process->stacksize = 1;
+    process->status = -1;
+    process->parent_pid = -1;
+    process->exit_code = -1;
+    process->num_kids = 0;
+    process->start_time = -1;
 }
 
 /* ------------------------------------------------------------------------
@@ -563,7 +597,7 @@ static void insertRL(proc_ptr proc){
     walker = ReadyList;
     while (walker != NULL && walker->priority <= proc->priority) {
     	previous = walker;
-    	walker = walker->next_proc_ptr
+    	walker = walker->next_proc_ptr;
     }
     	if (previous == NULL) {
     		/* process goes at front of ReadyList */
