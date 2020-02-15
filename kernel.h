@@ -1,4 +1,4 @@
-#define DEBUG 0
+#define DEBUG 1
 
 typedef struct proc_struct proc_struct;
 
@@ -17,6 +17,11 @@ struct proc_struct {
    char          *stack;
    unsigned int   stacksize;
    int            status;         /* READY, BLOCKED, QUIT, etc. */
+   short          parent_pid;
+   int            exit_code;
+   int            num_kids;
+   int            start_time;
+   short          zapped_pid;
    /* other fields as needed... */
 };
 
@@ -39,4 +44,3 @@ union psr_values {
 #define MAXPRIORITY 1
 #define SENTINELPID 1
 #define SENTINELPRIORITY LOWEST_PRIORITY
-
