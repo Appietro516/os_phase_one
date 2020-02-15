@@ -21,6 +21,7 @@ struct proc_struct {
    int            exit_code;
    int            num_kids;
    int            start_time;
+   int            run_time;
    short          zapped_pid;
    /* other fields as needed... */
 };
