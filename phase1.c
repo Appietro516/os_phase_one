@@ -17,6 +17,7 @@ void dispatcher(void);
 void launch();
 void enableInterrupts();
 void disableInterrupts();
+void dump_process(proc_struct);
 static void check_deadlock();
 static void insertRL(proc_ptr proc);
 static void clear_process(proc_ptr process);
@@ -382,18 +383,30 @@ void quit(int code){
    Side Effects - the context of the machine is changed
    ----------------------------------------------------------------------- */
 void dispatcher(void){
-    //TODO
-    //need to loop through ready processes, choose highest priority, get context, and context_switch
-   console("DISPAtcher called");
-   //proc_ptr next_process;
+   // need to loop through ready processes, choose highest priority, get context, and context_switch
+   console("DISPATCHED\n");
+   // proc_ptr next_process;
 
-   proc_struct temp_process = *ReadyList->next_proc_ptr;
-   Current = &temp_process;
+    proc_ptr curr = ReadyList;
+    proc_ptr to_sched = curr;
+    while (curr != NULL) {
+        if (curr->priority < to_sched->priority) {
+            to_sched = curr;
+        }
+        curr = curr->next_proc_ptr;
+    }
 
-   printf("RL slot 1: %d\n", temp_process.pid);
+    proc_ptr previous = Current;
+    Current = to_sched;
+    if (previous == NULL) {
+        context_switch(NULL, &(Current->state));
+    } else {
+        context_switch(&(previous->state), &(Current->state));
+    }
 
-   context_switch(NULL, &temp_process.state);
-   //p1_switch(Current->pid, next_process->pid);
+    dump_process(*to_sched);
+
+    // p1_switch(Current->pid, to_sched->pid);
 } /* dispatcher */
 
 /* ------------------------------------------------------------------------
@@ -578,6 +591,16 @@ void clear_process(proc_ptr process){
     process->exit_code = -1;
     process->num_kids = 0;
     process->start_time = -1;
+}
+
+void dump_process(proc_struct process) {
+    printf("Name: %s\n", process.name);
+    printf("PID: %d\n", process.pid);
+    printf("Parent's PID: %d\n", process.parent_pid);
+    printf("Priority: %d\n", process.priority);
+    printf("Status: %d\n", process.status);
+    printf("Children count: %d\n", process.num_kids);
+    // printf("CPU time consumed: %d\n", process.)
 }
 
 /* ------------------------------------------------------------------------
