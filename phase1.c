@@ -50,21 +50,21 @@ proc_ptr Current;
 unsigned int next_pid = SENTINELPID;
 
 /**
- *  Bootstrapping function called and required by USLOSS lib 
- */ 
+ *  Bootstrapping function called and required by USLOSS lib
+ */
 void startup() {
-    // value returned by call to fork1() 
-    int result; 
+    // value returned by call to fork1()
+    int result;
 
-    // initialize the process table 
+    // initialize the process table
     for (int i = 0; i < MAXPROC; i++){
         clear_process(&ProcTable[i]);
     }
 
-    // Initialize the Ready list, etc. 
+    // Initialize the Ready list, etc.
     ReadyList = NULL;
 
-    // Initialize the clock interrupt handler 
+    // Initialize the clock interrupt handler
     int_vec[CLOCK_INT] = clock_handler;
 
     // Start the sentinel process
@@ -92,11 +92,11 @@ void startup() {
 
 /**
  *  Finish function required by the USLOSS lib
- */ 
+ */
 void finish(){
    if (DEBUG && debugflag)
       console("in finish...\n");
-} 
+}
 
 /**
  *          Name -> fork1
@@ -109,7 +109,7 @@ void finish(){
  *                  be created or if priority is not between max and min priority.
  *  Side Effects -> ReadyList is changed, ProcTable is changed, Current
  *                  process information changed
- */ 
+ */
 int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority) {
     int proc_slot;
     int is_sentinel = strcmp(name, "sentinel") == 0;
@@ -251,23 +251,23 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority) 
  *                  -2 if the process has no children
  *  Side Effects -> If no child process has quit before join is called, the
  *                  parent is removed from the ready list and blocked.
- */ 
+ */
 int join(int *code){
     // // Disable interrupts
     // disableInterrupts();
 
     // Check if there are child processes
     if (Current->child_proc_ptr == NULL){
-        enableInterrupts();
+        //enableInterrupts();
         return -2;
     }
 
     // Check if the current process has been zapped
     if (Current->status == ZAPPED){
-        enableInterrupts();
+        //enableInterrupts();
         return -1;
     }
-    
+
     int can_terminate = 0;
     proc_ptr child = Current->child_proc_ptr;
     // check if children have quit
@@ -300,9 +300,9 @@ int join(int *code){
     *code = child->quit_status;
     child->pid;
 
-    enableInterrupts();
+    //enableInterrupts();
     return child->pid;
-} 
+}
 
 
 /**
@@ -313,20 +313,25 @@ int join(int *code){
  *    Parameters -> The code to return to the grieving parent
  *       Returns -> None.
  *  Side Effects -> Changes the parent of pid child completion status list.
- */ 
+ */
 void quit(int code) {
-    // Test if in kernel mode, halt if in user mode 
+    if (DEBUG && debugflag){
+        printf("quit(): PERFORMING QUIT FOR %d\n", Current->pid);
+    }
+
+    //Test if in kernel mode, halt if in user mode
     if((PSR_CURRENT_MODE & psr_get()) == 0) {
         // Not in kernel mode
         console("Kernel Error: Not in kernel mode, may not quit\n");
     }
 
-    // Check if process has children 
+    // Check if process has children
     proc_ptr child = Current->child_proc_ptr;
     while (child != NULL) {
         if (child->status != QUIT) {
             console("Process with children may not quit.\n");
             halt(1);
+            //may have to waitint() here, not sure. She just said wait to quit in project notes
         }
         child = child->next_sibling_ptr;
     }
@@ -343,7 +348,11 @@ void quit(int code) {
         dispatcher();
     }
 
-    // Check if current has been zapped 
+    dispatcher();
+    halt(0);
+
+
+    // Check if current has been zapped
     // TODO
 
 
@@ -447,10 +456,10 @@ void dispatcher(void) {
 
     // to_sched->start_time = clock();
 
-} 
+}
 
 static void remove_from_ready_list(proc_ptr proc) {
-    proc_ptr current, previous; 
+    proc_ptr current, previous;
     previous = NULL;
     current = ReadyList;
     while(current != NULL) {
@@ -467,7 +476,7 @@ static void remove_from_ready_list(proc_ptr proc) {
     }
 
     console("Attempt to remove process that didn't exist in ReadyList.");
-    halt(1);
+    halt(0);
 }
 
 static void insert_into_ready_list(proc_ptr proc) {
@@ -479,11 +488,11 @@ static void insert_into_ready_list(proc_ptr proc) {
     	current = current->next_proc_ptr;
     }
     if (previous == NULL) {
-        // process goes at front of ReadyList 
+        // process goes at front of ReadyList
         proc->next_proc_ptr = ReadyList;
         ReadyList = proc;
     } else {
-        // process goes after previous 
+        // process goes after previous
         previous->next_proc_ptr = proc;
         proc->next_proc_ptr = current;
     }
@@ -534,7 +543,7 @@ static void check_deadlock() {
             halt(0);
         }
     }
-} 
+}
 
 
 /* ------------------------------------------------------------------------
@@ -551,10 +560,7 @@ void launch(){
    if (DEBUG && debugflag)
       console("launch(): started\n");
 
-   /* Enable interrupts */
-   // enableInterrupts();
 
-   console("launch(): enabled interrupts\n");
 
    /* Call the function passed to fork1, and capture its return value */
    result = Current->start_func(Current->start_arg);
@@ -563,7 +569,7 @@ void launch(){
       console("Process %d returned to launch\n", Current->pid);
 
    quit(result);
-} 
+}
 
 
 /*
@@ -578,7 +584,7 @@ void disableInterrupts(){
   } else
     /* We ARE in kernel mode */
     psr_set( psr_get() & ~PSR_CURRENT_INT );
-} 
+}
 
 /*
  * Enable the interrupts.
@@ -599,8 +605,6 @@ void clock_handler(int pid){
     if (Current->run_time > TIME_SLICE) {
         dispatcher();
     }
-    else
-        enableInterrupts(); 
 }
 
 
@@ -644,6 +648,7 @@ void dump_processes() {
         }
     }
 }
+
 
 /* ------------------------- TODO: Support for l8r phases ----------------------------------- */
 
