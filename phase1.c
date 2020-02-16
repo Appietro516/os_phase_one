@@ -253,11 +253,11 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority) 
  *                  parent is removed from the ready list and blocked.
  */
 int join(int *code){
-    // // Disable interrupts
+    // Disable interrupts
     // disableInterrupts();
 
     // Check if there are child processes
-    if (Current->child_proc_ptr == NULL){
+    if (Current->child_proc_ptr == NULL && Current->quit_child_ptr == NULL){
         //enableInterrupts();
         return -2;
     }
@@ -268,40 +268,26 @@ int join(int *code){
         return -1;
     }
 
-    int can_terminate = 0;
-    proc_ptr child = Current->child_proc_ptr;
-    // check if children have quit
-    while (child != NULL) {
-        if (child->status == QUIT) {
-            can_terminate = 1;
-            break;
-        }
-        child = child->next_sibling_ptr;
-    }
-
-    if (can_terminate == 0) {
+    proc_ptr quit_child = Current->quit_child_ptr;
+    if (quit_child == NULL) {
         // No children have quit, set to blocked, remove from ready list
         Current->status = BLOCKED;
         remove_from_ready_list(Current);
         dispatcher();
 
         // A child has quit
-        // console("A child has quit, this process has gained focus once more.");
-        child = Current->child_proc_ptr;
-        while (child != NULL) {
-            if (child->status == QUIT) {
-                can_terminate = 1;
-                break;
-            }
-            child = child->next_sibling_ptr;
-        }
+        // console("A child has quit, this process has gained focus once more.\n");
+        quit_child = Current->quit_child_ptr;
+        // dump_process(*quit_child);
     }
 
-    *code = child->quit_status;
-    child->pid;
+    *code = quit_child->quit_status;
+    int quit_child_pid = quit_child->pid;
+    Current->quit_child_ptr = quit_child->next_quit_sibling_ptr;
+    // clear_process(quit_child);
 
-    //enableInterrupts();
-    return child->pid;
+    // enableInterrupts();
+    return quit_child_pid;
 }
 
 
@@ -325,6 +311,8 @@ void quit(int code) {
         console("Kernel Error: Not in kernel mode, may not quit\n");
     }
 
+    // disableInterrupts();
+
     // Check if process has children
     proc_ptr child = Current->child_proc_ptr;
     while (child != NULL) {
@@ -336,53 +324,55 @@ void quit(int code) {
         child = child->next_sibling_ptr;
     }
 
+    if (Current->status == READY) {
+        remove_from_ready_list(Current);
+    }
+
     // Add quit metadata
     Current->status = QUIT;
     Current->quit_status = code;
 
     // Check if parent is waiting for join
     proc_ptr parent = Current->parent;
-    if (parent != NULL && parent->status == BLOCKED) {
-        parent->status = READY;
-        insert_into_ready_list(parent);
-        dispatcher();
+    if (parent != NULL) {
+        if (parent->status == BLOCKED) {
+            parent->status = READY;
+            insert_into_ready_list(parent);
+        }
+        
+        // Add current process to the list of QUIT children
+        proc_ptr quit_child = parent->quit_child_ptr;
+        if (quit_child == NULL) {
+            parent->quit_child_ptr = Current;
+        } else {
+            while (quit_child->next_quit_sibling_ptr != NULL) {
+                quit_child = quit_child->next_quit_sibling_ptr;
+            }
+            quit_child->next_quit_sibling_ptr = Current;
+        }
+
+        // Remove current process from normal list of childrean
+        proc_ptr prev_child, curr_child;
+        prev_child = NULL;
+        curr_child = parent->child_proc_ptr;
+        while (curr_child != NULL) {
+            if (curr_child->pid == Current->pid) {
+                if (prev_child == NULL) {
+                    parent->child_proc_ptr = NULL;
+                } else {
+                    prev_child->next_quit_sibling_ptr = curr_child->next_sibling_ptr;
+                }
+            }
+            prev_child = curr_child;
+            curr_child = curr_child->next_sibling_ptr;
+        }
     }
-
-    dispatcher();
-    halt(0);
-
 
     // Check if current has been zapped
     // TODO
 
-
-    // for(int i = 1; i < MAXPROC; i++){
-    //     proc_ptr process = &ProcTable[i];
-    //     if(process->status != QUIT && process->parent->pid == Current->pid && process != Current) {
-    //         enableInterrupts();
-    //         console("quit(): process still has children\n");
-    //         while (1){
-    //            check_deadlock();
-    //            waitint();
-    //         }
-    //     }
-    // }
-
-    // p1_quit(Current->pid);
-
-    // //should remove from ready list, cear_process on current, then call dispsatcher
-    // //should also check for ZAPPED process and add to READY
-
-    // //this code does not appear to be working
-    // // for(int i = 1; i < MAXPROC; i++){
-    // //     proc_struct process = ProcTable[i];
-    // //     if(process.status == QUIT && process.parent_pid == Current->pid && &process != Current) {
-    // //         console("GOT QUIT");
-    // //         clear_process(&process);
-    // //     } else if(process.status == ZAPPED && process.zapped_pid == Current->pid){
-    // //         process.status = READY;
-    // //     }
-    // // }
+    // enableInterrupts();
+    dispatcher();
 }
 
 int zap(int pid){
@@ -430,6 +420,8 @@ void dispatcher(void) {
     //     dump_process(*p);
     //     p = p->next_proc_ptr;
     // }
+
+    // disableInterrupts();
 
     proc_ptr process_to_schedule, previous;
     previous = Current;
@@ -536,10 +528,12 @@ static void check_deadlock() {
         }
     }
 
-    if (ready_processes == 1 ){
-        if (total_processes != 1){ // processes stuck
+    if (ready_processes == 1 ) {
+        if (total_processes != 1) { // processes stuck
+            console("Sentinel detected deadlock.");
             halt(1);
-        } else { //not deadlock
+        } else { // not deadlock
+            console("All processes completed.");
             halt(0);
         }
     }
@@ -615,6 +609,8 @@ void clear_process(proc_ptr process) {
     process->child_proc_ptr = NULL;
     process->next_sibling_ptr = NULL;
     process->parent = NULL;
+    process->quit_child_ptr = NULL;
+    process->next_quit_sibling_ptr = NULL;
     strcpy(process->name, "");
     strcpy(process->start_arg, "");
     //process->state = NULL;
@@ -648,7 +644,6 @@ void dump_processes() {
         }
     }
 }
-
 
 /* ------------------------- TODO: Support for l8r phases ----------------------------------- */
 
