@@ -223,7 +223,6 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority) 
    //add process to ReadyList
    insert_into_ready_list(&ProcTable[proc_slot]);
 
-//    console("fork1(): INSERTED TO RL\n");
 
    /* for future phase(s) */
    p1_fork(ProcTable[proc_slot].pid);
@@ -334,6 +333,7 @@ void quit(int code) {
 
     // Check if parent is waiting for join
     proc_ptr parent = Current->parent;
+  
     if (parent != NULL) {
         if (parent->status == BLOCKED) {
             parent->status = READY;
@@ -367,36 +367,61 @@ void quit(int code) {
             curr_child = curr_child->next_sibling_ptr;
         }
     }
-
-    // Check if current has been zapped
-    // TODO
+  
+    //get processes with this quitting process as a zapped_pid and Ready them up
+    for(int i = 0; i < MAXPROC; i++){
+        proc_ptr process = &ProcTable[i];
+        //process is ZAPPED, process had zapped the quiting process
+        if(process->status == ZAPPED && process->zapped_pid == Current->pid) {
+            process->status = READY;
+            process->zapped_pid = -1;
+            insert_into_ready_list(process);
+        }
+    }
 
     // enableInterrupts();
     dispatcher();
+  
+    console("SHOUDNT BE HERE");
 }
 
 int zap(int pid){
+    //make sure process is not zapping itself
     if (Current->pid == pid){
         console("zap(): process cannot zap itself");
         halt(1);
     }
 
+    //get ptr to zapee
     proc_ptr process;
     for(int i = 1; i < MAXPROC; i++){
-        proc_ptr process = &ProcTable[i];
+        process = &ProcTable[i];
         if (process->pid == pid){
             break;
         }
         process = NULL;
     }
 
+    //null ptr means zapee doesnt exist
     if (!process){
         console("zap(): Cannot zap a process that doesn't exist");
         halt(1);
     }
 
+    //per phase 1 zap return values "The calling process itself was zapped"
+    if (Current->status == ZAPPED){
+        console("Calling process itself was zapped")
+        return -1;
+    }
+
+
+    //set current to ZAPPED, remove from RL, call dispatcher
     Current->status = ZAPPED;
     Current->zapped_pid = process->pid;
+    remove_from_ready_list(Current);
+    dispatcher();
+
+    return 0;
 }
 
 int	is_zapped(void){
@@ -627,6 +652,7 @@ void clear_process(proc_ptr process) {
 }
 
 void dump_process(proc_struct process) {
+    printf("-------------------------------\n");
     printf("Name: %s\n", process.name);
     printf("PID: %d\n", process.pid);
     printf("Parent's PID: %d\n", process.parent_pid);
@@ -634,6 +660,7 @@ void dump_process(proc_struct process) {
     printf("Status: %d\n", process.status);
     printf("Children count: %d\n", process.num_kids);
     printf("CPU time consumed: %d\n", process.run_time);
+    printf("-------------------------------\n");
 }
 
 void dump_processes() {
@@ -680,7 +707,11 @@ int unblock_proc(int pid){
 }
 
 int read_cur_start_time(void){
-    // TODO
+    if (Current){
+        return Current->start_time;
+    }
+    return -1;
+
 }
 
 void time_slice(void){
