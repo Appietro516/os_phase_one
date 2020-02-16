@@ -653,24 +653,46 @@ void clear_process(proc_ptr process) {
 }
 
 void dump_process(proc_struct process) {
-    printf("-------------------------------\n");
-    printf("Name: %s\n", process.name);
-    printf("PID: %d\n", process.pid);
-    printf("Parent's PID: %d\n", process.parent_pid);
-    printf("Priority: %d\n", process.priority);
-    printf("Status: %d\n", process.status);
-    printf("Children count: %d\n", process.num_kids);
-    printf("CPU time consumed: %d\n", process.run_time);
-    printf("-------------------------------\n");
+    printf("| %5d |", process.pid);
+    printf("  %5d |", process.parent_pid);
+    printf("    %5d |", process.priority);
+    printf(" %11d |", process.num_kids);
+    switch (process.status) {
+        case -1: 
+            printf("  %s   |", "EMPTY");
+            break;
+        case 1:
+            printf("  %s   |", "READY");
+            break;
+        case 2:
+            printf(" %s |", "BLOCKED");
+            break;
+        case 3: 
+            printf("   %s   |", "ZAPPED");
+            break;
+        case 4:
+            printf("   %s   |", "QUIT");
+            break;
+    }
+    printf(" %8d |", process.run_time);
+    printf(" %-50s |\n", process.name); // MAXNAME is fitty
+    // printf("----------------------------------------------------------------------------------------------------------------------\n");
 }
 
+int dump_all = 1;
 void dump_processes() {
+    printf("----------------------------------------------------------------------------------------------------------------------\n");
+    printf("|  %s  | %s | %s | %s |  %s  | %s | %-50s | \n", "PID", "Parent", "Priority", "Child Count", "Status", "CPU Time", "Name");
+    printf("----------------------------------------------------------------------------------------------------------------------\n");
     for (int i = 0; i < MAXPROC; i++) {
         proc_struct p = ProcTable[i];
-        if (p.pid >= 0) {
+        if (!dump_all && p.pid >= 0) {
             dump_process(ProcTable[i]);
-        }
+            continue;
+        } 
+        dump_process(ProcTable[i]);
     }
+    printf("---------------------------------------------------------------------------------------------------------------------\n");
 }
 
 int getpid(){
