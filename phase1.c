@@ -333,6 +333,7 @@ void quit(int code) {
 
     // Check if parent is waiting for join
     proc_ptr parent = Current->parent;
+  
     if (parent != NULL) {
         if (parent->status == BLOCKED) {
             parent->status = READY;
@@ -380,7 +381,7 @@ void quit(int code) {
 
     // enableInterrupts();
     dispatcher();
-
+  
     console("shoudnt be here");
 }
 
@@ -409,6 +410,7 @@ int zap(int pid){
 
     //per phase 1 zap return values "The calling process itself was zapped"
     if (Current->status == ZAPPED){
+
         console("Calling process itself was zapped");
         return -1;
     }
