@@ -339,7 +339,7 @@ void quit(int code) {
             parent->status = READY;
             insert_into_ready_list(parent);
         }
-        
+
         // Add current process to the list of QUIT children
         proc_ptr quit_child = parent->quit_child_ptr;
         if (quit_child == NULL) {
@@ -367,7 +367,7 @@ void quit(int code) {
             curr_child = curr_child->next_sibling_ptr;
         }
     }
-  
+
     //get processes with this quitting process as a zapped_pid and Ready them up
     for(int i = 0; i < MAXPROC; i++){
         proc_ptr process = &ProcTable[i];
@@ -382,7 +382,7 @@ void quit(int code) {
     // enableInterrupts();
     dispatcher();
   
-    console("SHOUDNT BE HERE");
+    console("shoudnt be here");
 }
 
 int zap(int pid){
@@ -410,7 +410,8 @@ int zap(int pid){
 
     //per phase 1 zap return values "The calling process itself was zapped"
     if (Current->status == ZAPPED){
-        console("Calling process itself was zapped")
+
+        console("Calling process itself was zapped");
         return -1;
     }
 
@@ -670,6 +671,13 @@ void dump_processes() {
             dump_process(ProcTable[i]);
         }
     }
+}
+
+int getpid(){
+    if (Current){
+        return Current->pid;
+    }
+    return -1;
 }
 
 /* ------------------------- TODO: Support for l8r phases ----------------------------------- */
