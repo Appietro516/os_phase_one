@@ -18,20 +18,21 @@ struct proc_struct {
    unsigned int   stacksize;
    int            status;         /* READY, BLOCKED, QUIT, etc. */
    short          parent_pid;
-   int            exit_code;
+   int            quit_status;
    int            num_kids;
    int            start_time;
    int            run_time;
    short          zapped_pid;
+   proc_ptr       parent;
    /* other fields as needed... */
 };
 
 struct psr_bits {
-        unsigned int cur_mode:1;
-       unsigned int cur_int_enable:1;
-        unsigned int prev_mode:1;
-        unsigned int prev_int_enable:1;
-    unsigned int unused:28;
+   unsigned int cur_mode:1;
+   unsigned int cur_int_enable:1;
+   unsigned int prev_mode:1;
+   unsigned int prev_int_enable:1;
+   unsigned int unused:28;
 };
 
 union psr_values {
