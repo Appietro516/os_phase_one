@@ -205,6 +205,7 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority) 
     // Add parent pid for processes
     // Add child ptr to list of children
     if (Current) {
+        ProcTable[proc_slot].parent_pid = Current->pid;
         Current->num_kids++;
         ProcTable[proc_slot].next_sibling_ptr = Current->child_proc_ptr;
         Current->child_proc_ptr = &ProcTable[proc_slot];
@@ -253,7 +254,7 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority) 
  */
 int join(int *code){
     // Disable interrupts
-    // disableInterrupts();
+     //disableInterrupts();
 
     // proc_ptr r = ReadyList;
     // while(r != NULL) {
@@ -282,14 +283,15 @@ int join(int *code){
 
         // This process has regained control because a child has quit
         quit_child = Current->quit_child_ptr;
-    } 
-    
+    }
+
     *code = quit_child->quit_status;
     int quit_child_pid = quit_child->pid;
     Current->quit_child_ptr = quit_child->next_quit_sibling_ptr;
     Current->num_kids--;
     clear_process(quit_child);
 
+    enableInterrupts();
     return quit_child_pid;
 }
 
@@ -311,6 +313,7 @@ void quit(int code) {
     if((PSR_CURRENT_MODE & psr_get()) == 0) {
         // Not in kernel mode
         console("Kernel Error: Not in kernel mode, may not quit\n");
+        halt(1);
     }
 
     // Check if process has children
@@ -332,7 +335,7 @@ void quit(int code) {
 
     // Check if parent is waiting for join
     proc_ptr parent = Current->parent;
-  
+
     if (parent != NULL) {
         if (parent->status == JOIN_BLOCKED) {
             parent->status = READY;
@@ -372,7 +375,7 @@ void quit(int code) {
     for(int i = 0; i < MAXPROC; i++){
         proc_ptr process = &ProcTable[i];
         //process is ZAPPED, process had zapped the quiting process
-        if(process->status == ZAPPED && process->zapped_pid == Current->pid) {
+        if(process->zapped_pid == Current->pid) {
             process->status = READY;
             process->zapped_pid = -1;
             insert_into_ready_list(process);
@@ -382,7 +385,7 @@ void quit(int code) {
     // enableInterrupts();
     dispatcher();
 
-    console("shoudnt be here");
+    console("quit(): shoudnt be here\n");
 }
 
 int zap(int pid){
@@ -392,7 +395,7 @@ int zap(int pid){
         halt(1);
     }
 
-    //get ptr to zapee
+    //get ptr to zapped
     proc_ptr process;
     for(int i = 1; i < MAXPROC; i++){
         process = &ProcTable[i];
@@ -408,21 +411,28 @@ int zap(int pid){
         halt(1);
     }
 
-    //per phase 1 zap return values "The calling process itself was zapped"
+    //per testcase 36
     if (Current->status == ZAPPED){
-
-        console("Calling process itself was zapped");
-        return -1;
+        return 0;
     }
 
-
     //set current to ZAPPED, remove from RL, call dispatcher
-    Current->status = ZAPPED;
+    process->status = ZAPPED;
     Current->zapped_pid = process->pid;
     remove_from_ready_list(Current);
     dispatcher();
 
+
+    //zap does not return until the zapped process has quit
+    enableInterrupts();
+
+    // while (process->status != QUIT){
+    //     waitint();
+    // }
+
     return 0;
+
+    // return 0;
 }
 
 int	is_zapped(void){
@@ -440,21 +450,29 @@ int	is_zapped(void){
    Side Effects - the context of the machine is changed
    ----------------------------------------------------------------------- */
 void dispatcher(void) {
-    // proc_ptr p = ReadyList;
-    // while(p!=NULL){
-    //     dump_process(*p);
-    //     p = p->next_proc_ptr;
-    // }
-    
     proc_ptr process_to_schedule, previous;
     previous = Current;
+
+    //record runtime for last process
+    if (Current && Current->start_time != -1){
+        Current->total_run_time = Current->total_run_time + sys_clock() - Current->start_time;
+    }
+
+    //schedule new process
     process_to_schedule = ReadyList;
+    if ((process_to_schedule->current_run_time > TIME_SLICE) ) {
+        process_to_schedule = ReadyList->next_proc_ptr;
+    }
     Current = process_to_schedule;
-    Current->status = RUNNING;
-    // remove_from_ready_list(Current);
+    if (Current->status != ZAPPED){
+        Current->status = RUNNING;
+    }
 
-    Current->start_time = clock();
+    //set start time
+    Current->start_time = sys_clock();
 
+
+    //usloss switch context
     if (previous == NULL) {
         p1_switch(NULL, Current->pid);
         context_switch(NULL, &(Current->state));
@@ -482,8 +500,8 @@ static void remove_from_ready_list(proc_ptr proc) {
         current = current->next_proc_ptr;
     }
 
-    console("Attempt to remove process that didn't exist in ReadyList.");
-    halt(0);
+    // console("Attempt to remove process that didn't exist in ReadyList.");
+    // //halt(0);
 }
 
 static void insert_into_ready_list(proc_ptr proc) {
@@ -531,26 +549,20 @@ int sentinel (void * dummy){
 
 /* check to determine if deadlock has occurred... */
 static void check_deadlock() {
-    int total_processes;
     int ready_processes;
     for(int i = 1; i < MAXPROC; i++){
         proc_struct process = ProcTable[i];
-        if(process.status == READY) {
+        if(process.status == RUNNING || process.status == ZAPPED) {
             ready_processes++;
-            total_processes++;
-        } else if (ProcTable[i].status == JOIN_BLOCKED || ProcTable[i].status == ZAPPED) {
-            total_processes++;
         }
     }
 
-    if (ready_processes == 1 ) {
-        if (total_processes != 1) { // processes stuck
-            console("Sentinel detected deadlock.");
-            halt(1);
-        } else { // not deadlock
-            console("All processes completed.");
-            halt(0);
-        }
+    if (ready_processes > 1) {
+        console("Sentinel detected deadlock. Halting...\n");
+        halt(1);
+    } else { // not deadlock
+        console("All processes completed.\n");
+        halt(0);
     }
 }
 
@@ -569,8 +581,10 @@ void launch(){
    if (DEBUG && debugflag)
       console("launch(): started\n");
 
+   enableInterrupts();
    /* Call the function passed to fork1, and capture its return value */
    result = Current->start_func(Current->start_arg);
+   disableInterrupts();
 
    if (DEBUG && debugflag)
       console("Process %d returned to launch\n", Current->pid);
@@ -599,17 +613,17 @@ void disableInterrupts(){
 void enableInterrupts(){
     if((PSR_CURRENT_MODE & psr_get()) == 0) {
       // Not in kernel mode
-      console("Kernel Error: Not in kernel mode, may not disable interrupts\n");
+      console("Kernel Error: Not in kernel mode, may not enable interrupts\n");
       halt(1);
     } else
       // We ARE in kernel mode
-     psr_set( psr_get() & PSR_CURRENT_INT );
+     psr_set( psr_get() | PSR_CURRENT_INT );
 }
 
 
 void clock_handler(int pid){
-    Current->run_time = clock() - Current->start_time;
-    if (Current->run_time > TIME_SLICE) {
+    Current->current_run_time = sys_clock() - Current->start_time;
+    if (Current->current_run_time > TIME_SLICE) {
         dispatcher();
     }
 }
@@ -636,6 +650,8 @@ void clear_process(proc_ptr process) {
     process->status = -1;
     process->quit_status = -1;
     process->num_kids = 0;
+    process->current_run_time = -1;
+    process->total_run_time = -1;
     process->start_time = -1;
 }
 
@@ -645,10 +661,10 @@ void dump_process(proc_struct process) {
     printf("    %5d |", process.priority);
     printf(" %11d |", process.num_kids);
     switch (process.status) {
-        case -1: 
+        case -1:
             printf("  %s   |", "EMPTY");
             break;
-        case 1: 
+        case 1:
             printf("  %s |", "RUNNING");
             break;
         case 2:
@@ -657,14 +673,17 @@ void dump_process(proc_struct process) {
         case 3:
             printf("  %s |", "BLOCKED");
             break;
-        case 4: 
+        case 4:
             printf("   %s   |", "ZAPPED");
             break;
         case 5:
             printf("   %s   |", "QUIT");
             break;
+        default:
+            printf("    %d    |", process.status);
+            break;
     }
-    printf(" %8d |", process.run_time);
+    printf(" %8d |", process.total_run_time);
     printf(" %-50s |\n", process.name); // MAXNAME is fitty
     // printf("----------------------------------------------------------------------------------------------------------------------\n");
 }
@@ -679,7 +698,7 @@ void dump_processes() {
         if (!dump_all && p.pid >= 0) {
             dump_process(ProcTable[i]);
             continue;
-        } 
+        }
         dump_process(ProcTable[i]);
     }
     printf("---------------------------------------------------------------------------------------------------------------------\n");
@@ -695,7 +714,6 @@ int getpid(){
 /* ------------------------- TODO: Support for l8r phases ----------------------------------- */
 
 int block_me(int new_status){
-    // TODO not sure about this one. it says to block the process but use new_status as status?
     if (new_status <= 10){
         console("block_me(): status not greater than 10\n");
         halt(1);
@@ -704,7 +722,10 @@ int block_me(int new_status){
         console("block_me(): attempting to block a zapped process\n");
         return -1;
     }
+
     Current->status = new_status;
+    remove_from_ready_list(Current);
+    dispatcher();
     return 0;
 }
 
@@ -716,13 +737,14 @@ int unblock_proc(int pid){
 
     for(int i = 1; i < MAXPROC; i++){
         proc_struct proc = ProcTable[i];
-        if (proc.pid == pid && proc.pid != Current->pid && proc.status > 10){
+        if (proc.pid == pid && proc.pid != Current->pid){
             proc.status = READY;
             insert_into_ready_list(&proc);
+            dispatcher();
             return 0;
         }
     }
-    console("unblock_proc(): attempting to unblock PID that does not exist/current process/status<=10\n");
+    console("unblock_proc(): attempting to unblock PID that does not exist\n");
     return -2;
 }
 

@@ -23,7 +23,8 @@ struct proc_struct {
    int            quit_status;
    int            num_kids;
    int            start_time;
-   int            run_time;
+   int            current_run_time;
+   int            total_run_time;
    short          zapped_pid;
    proc_ptr       parent;
    /* other fields as needed... */
