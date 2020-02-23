@@ -25,12 +25,13 @@ static void remove_from_ready_list(proc_ptr proc);
 static void clear_process(proc_ptr process);
 
 /* ------------------------- MACROS ----------------------------------- */
-#define READY 1
-#define BLOCKED 2
-#define ZAPPED 3
-#define QUIT 4
+#define RUNNING 1
+#define READY 2
+#define JOIN_BLOCKED 3
+#define ZAPPED 4
+#define QUIT 5
 #define EMPTY -1
-#define TIME_SLICE 8000
+#define TIME_SLICE 80
 
 /* -------------------------- Globals ------------------------------------- */
 
@@ -223,7 +224,6 @@ int fork1(char *name, int (*f)(char *), char *arg, int stacksize, int priority) 
    //add process to ReadyList
    insert_into_ready_list(&ProcTable[proc_slot]);
 
-
    /* for future phase(s) */
    p1_fork(ProcTable[proc_slot].pid);
 
@@ -255,6 +255,12 @@ int join(int *code){
     // Disable interrupts
     // disableInterrupts();
 
+    // proc_ptr r = ReadyList;
+    // while(r != NULL) {
+    //     printf("%d ", r->pid);
+    //     r = r->next_proc_ptr;
+    // }
+
     // Check if there are child processes
     if (Current->child_proc_ptr == NULL && Current->quit_child_ptr == NULL){
         //enableInterrupts();
@@ -270,25 +276,22 @@ int join(int *code){
     proc_ptr quit_child = Current->quit_child_ptr;
     if (quit_child == NULL) {
         // No children have quit, set to blocked, remove from ready list
-        Current->status = BLOCKED;
+        Current->status = JOIN_BLOCKED;
         remove_from_ready_list(Current);
         dispatcher();
 
-        // A child has quit
-        // console("A child has quit, this process has gained focus once more.\n");
+        // This process has regained control because a child has quit
         quit_child = Current->quit_child_ptr;
-        // dump_process(*quit_child);
-    }
-
+    } 
+    
     *code = quit_child->quit_status;
     int quit_child_pid = quit_child->pid;
     Current->quit_child_ptr = quit_child->next_quit_sibling_ptr;
-    // clear_process(quit_child);
+    Current->num_kids--;
+    clear_process(quit_child);
 
-    // enableInterrupts();
     return quit_child_pid;
 }
-
 
 /**
  *          Name -> quit
@@ -304,13 +307,11 @@ void quit(int code) {
         printf("quit(): PERFORMING QUIT FOR %d\n", Current->pid);
     }
 
-    //Test if in kernel mode, halt if in user mode
+    // Test if in kernel mode, halt if in user mode
     if((PSR_CURRENT_MODE & psr_get()) == 0) {
         // Not in kernel mode
         console("Kernel Error: Not in kernel mode, may not quit\n");
     }
-
-    // disableInterrupts();
 
     // Check if process has children
     proc_ptr child = Current->child_proc_ptr;
@@ -323,9 +324,7 @@ void quit(int code) {
         child = child->next_sibling_ptr;
     }
 
-    if (Current->status == READY) {
-        remove_from_ready_list(Current);
-    }
+    remove_from_ready_list(Current);
 
     // Add quit metadata
     Current->status = QUIT;
@@ -335,7 +334,7 @@ void quit(int code) {
     proc_ptr parent = Current->parent;
   
     if (parent != NULL) {
-        if (parent->status == BLOCKED) {
+        if (parent->status == JOIN_BLOCKED) {
             parent->status = READY;
             insert_into_ready_list(parent);
         }
@@ -344,6 +343,7 @@ void quit(int code) {
         proc_ptr quit_child = parent->quit_child_ptr;
         if (quit_child == NULL) {
             parent->quit_child_ptr = Current;
+            Current->next_quit_sibling_ptr = NULL;
         } else {
             while (quit_child->next_quit_sibling_ptr != NULL) {
                 quit_child = quit_child->next_quit_sibling_ptr;
@@ -381,7 +381,7 @@ void quit(int code) {
 
     // enableInterrupts();
     dispatcher();
-  
+
     console("shoudnt be here");
 }
 
@@ -429,7 +429,6 @@ int	is_zapped(void){
     return Current->status == ZAPPED;
 }
 
-
 /* ------------------------------------------------------------------------
    Name - dispatcher
    Purpose - dispatches ready processes.  The process with the highest
@@ -446,13 +445,15 @@ void dispatcher(void) {
     //     dump_process(*p);
     //     p = p->next_proc_ptr;
     // }
-
-    // disableInterrupts();
-
+    
     proc_ptr process_to_schedule, previous;
     previous = Current;
     process_to_schedule = ReadyList;
     Current = process_to_schedule;
+    Current->status = RUNNING;
+    // remove_from_ready_list(Current);
+
+    Current->start_time = clock();
 
     if (previous == NULL) {
         p1_switch(NULL, Current->pid);
@@ -461,18 +462,6 @@ void dispatcher(void) {
         p1_switch(previous->pid, Current->pid);
         context_switch(&(previous->state), &(Current->state));
     }
-
-    // proc_ptr curr = ReadyList;
-    // proc_ptr to_sched = curr;
-    // while (curr != NULL) {
-    //     if ((curr != to_sched && to_sched->run_time > TIME_SLICE) || curr->priority < to_sched->priority) {
-    //         to_sched->run_time = 0;
-    //         to_sched = curr;
-    //     }
-    //     curr = curr->next_proc_ptr;
-    // }
-
-    // to_sched->start_time = clock();
 
 }
 
@@ -549,7 +538,7 @@ static void check_deadlock() {
         if(process.status == READY) {
             ready_processes++;
             total_processes++;
-        } else if (ProcTable[i].status == BLOCKED || ProcTable[i].status == ZAPPED) {
+        } else if (ProcTable[i].status == JOIN_BLOCKED || ProcTable[i].status == ZAPPED) {
             total_processes++;
         }
     }
@@ -579,8 +568,6 @@ void launch(){
 
    if (DEBUG && debugflag)
       console("launch(): started\n");
-
-
 
    /* Call the function passed to fork1, and capture its return value */
    result = Current->start_func(Current->start_arg);
@@ -661,16 +648,19 @@ void dump_process(proc_struct process) {
         case -1: 
             printf("  %s   |", "EMPTY");
             break;
-        case 1:
-            printf("  %s   |", "READY");
+        case 1: 
+            printf("  %s |", "RUNNING");
             break;
         case 2:
-            printf(" %s |", "BLOCKED");
+            printf("  %s   |", "READY");
             break;
-        case 3: 
+        case 3:
+            printf("  %s |", "BLOCKED");
+            break;
+        case 4: 
             printf("   %s   |", "ZAPPED");
             break;
-        case 4:
+        case 5:
             printf("   %s   |", "QUIT");
             break;
     }
